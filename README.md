@@ -1,5 +1,11 @@
 # Anti-money laundering detection on the IBM synthetic transactions dataset
 
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![DuckDB](https://img.shields.io/badge/DuckDB-parquet-yellow)
+![LightGBM](https://img.shields.io/badge/LightGBM-temporal%20split-brightgreen)
+![Streamlit](https://img.shields.io/badge/dashboard-Streamlit-red)
+
 An end-to-end analytics project on the IBM "Transactions for Anti Money Laundering" data
 (Altman et al., NeurIPS 2023; Kaggle `ealtman2019/ibm-transactions-for-anti-money-laundering-aml`).
 It covers ingestion and currency normalisation, graph analysis, rule-based typology detectors,
@@ -8,6 +14,30 @@ evaluation, and an interactive investigation dashboard.
 
 > **Status:** all phases complete. Results below were produced on HI-Small and are reproducible
 > from `make data features detect train` (a clean-clone run is described under "Reproducibility").
+
+**At a glance** (5.1M transactions, 0.10% laundering)
+
+| Approach | Result |
+|---|---|
+| Rule-based detectors | scatter-gather 34% precision, cycles 18%, against a 0.10% base rate |
+| Unsupervised (Isolation Forest) | about 20x random precision in the top 100 accounts |
+| Supervised LightGBM, strict temporal test | precision@100 0.99, PR-AUC 0.59 (0.41 before the late-period artefact) |
+
+## Pipeline
+
+```mermaid
+flowchart LR
+    A[Kaggle CSV] --> B[DuckDB / parquet<br/>ingest + FX normalisation]
+    B --> C[Graph analysis<br/>SCCs, ego networks]
+    B --> D[Typology detectors<br/>cycles, fan-in/out, scatter-gather]
+    B --> E[Leakage-free features]
+    E --> F[Account anomaly models<br/>IForest, LOF, HDBSCAN]
+    E --> G[LightGBM<br/>temporal split]
+    D --> H[(Score tables)]
+    F --> H
+    G --> H
+    H --> I[Streamlit investigation dashboard]
+```
 
 ## Set-up
 
@@ -195,3 +225,8 @@ notebooks/             01_eda, 02_graph, 03_results (+ .py sources)
 reports/               tables/ (tracked) and figures/ (git-ignored, regenerated)
 tests/                 pytest suite (also covers the dashboard with AppTest)
 ```
+
+## License
+
+MIT. See `LICENSE`. The IBM dataset is distributed under its own terms on Kaggle and is not
+included in this repository.

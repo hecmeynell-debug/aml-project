@@ -7,6 +7,8 @@ name = "aml"
 version = "0.1.0"
 description = "Anti-money laundering analytics on the IBM synthetic transactions dataset"
 requires-python = ">=3.10"
+license = { text = "MIT" }
+readme = "README.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]
