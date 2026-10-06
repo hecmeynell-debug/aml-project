@@ -152,3 +152,88 @@ def evaluate_detectors(cfg: Config, findings: pd.DataFrame) -> tuple[pd.DataFram
     logger.info("Typology recall:\n%s", recall.round(3).to_string())
     logger.info("Detector precision:\n%s", prec.round(4).to_string())
     return recall, prec
+
+
+# --------------------------------------------------------------------------- account-level (Phase 4)
+def account_labels(cfg: Config) -> pd.Series:
+    """Accounts that took part in at least one laundering transaction (as sender or receiver)."""
+    import duckdb
+
+    p = cfg.transactions_parquet.as_posix()
+    df = duckdb.sql(f"""
+        SELECT acc, 1 AS y FROM (
+            SELECT src AS acc FROM read_parquet('{p}') WHERE is_laundering = 1
+            UNION SELECT dst FROM read_parquet('{p}') WHERE is_laundering = 1)
+    """).df()
+    return df.set_index("acc")["y"]
+
+
+def precision_at_k(y: np.ndarray, score: np.ndarray, k: int) -> float:
+    """Precision among the ``k`` highest scores, with ties at the boundary handled in expectation.
+
+    If the k-th score is tied with others, the tied group contributes its own positive rate in
+    proportion to the slots it fills (equivalent to breaking ties uniformly at random).
+    """
+    y = np.asarray(y, dtype=float)
+    score = np.asarray(score, dtype=float)
+    k = min(k, len(y))
+    order = np.argsort(-score, kind="stable")
+    cut = score[order[k - 1]]
+    above = score > cut
+    tied = score == cut
+    slots = k - above.sum()
+    hits = y[above].sum() + slots * (y[tied].mean() if tied.any() else 0.0)
+    return float(hits / k)
+
+
+def evaluate_anomaly(
+    cfg: Config, scores: pd.DataFrame, labels: pd.Series | None = None
+) -> pd.DataFrame:
+    """Precision@k and PR-AUC for each method, the ensemble and a random baseline.
+
+    Saves ``reports/tables/anomaly_results.csv`` and the precision-recall plot. For HDBSCAN the
+    binary flag's precision/recall are reported too. The random baseline's expected precision@k
+    and PR-AUC both equal the positive rate; one seeded random draw is also shown.
+    """
+    import matplotlib.pyplot as plt
+    from sklearn.metrics import average_precision_score, precision_recall_curve
+
+    labels = labels if labels is not None else account_labels(cfg)
+    y = scores.index.to_series().map(labels).fillna(0).to_numpy()
+    prevalence = float(y.mean())
+    rng = np.random.default_rng(cfg.seed)
+    methods = {"isolation_forest": scores["iforest"], "lof": scores["lof"],
+               "hdbscan": scores["hdbscan"], "ensemble": scores["ensemble"],
+               "random (seeded draw)": pd.Series(rng.random(len(y)), index=scores.index)}
+    ks = cfg.anomaly.precision_at_k
+    rows = []
+    fig, ax = plt.subplots(figsize=(6.5, 4.5))
+    for name, s in methods.items():
+        arr = s.to_numpy()
+        row = {"method": name, "pr_auc": average_precision_score(y, arr)}
+        for k in ks:
+            row[f"precision@{k}"] = precision_at_k(y, arr, k)
+        rows.append(row)
+        p, r, _ = precision_recall_curve(y, arr)
+        ax.plot(r, p, label=f"{name} (AP {row['pr_auc']:.3f})", lw=1.4)
+    rows.append({"method": "random (expected)", "pr_auc": prevalence,
+                 **{f"precision@{k}": prevalence for k in ks}})
+    ax.axhline(prevalence, color="grey", ls=":", lw=1)
+    ax.set_xlabel("Recall"); ax.set_ylabel("Precision"); ax.set_yscale("log")
+    ax.set_title("Account anomaly detection: precision-recall"); ax.legend(fontsize=8)
+    fig.tight_layout()
+    fig_dir = cfg.root / cfg.paths.figures_dir
+    fig.savefig(fig_dir / "anomaly_pr_curves.png", dpi=130)
+    plt.close(fig)
+
+    res = pd.DataFrame(rows).set_index("method")
+    flag = scores["hdbscan_flag"].to_numpy().astype(bool)
+    res["flag_precision"] = np.nan
+    res["flag_recall"] = np.nan
+    res.loc["hdbscan", "flag_precision"] = y[flag].mean() if flag.any() else np.nan
+    res.loc["hdbscan", "flag_recall"] = y[flag].sum() / y.sum()
+    res["n_accounts"] = len(y)
+    res["n_illicit"] = int(y.sum())
+    res.to_csv(cfg.root / cfg.paths.tables_dir / "anomaly_results.csv")
+    logger.info("Anomaly results (positive rate %.4f):\n%s", prevalence, res.round(4).to_string())
+    return res

@@ -66,6 +66,10 @@ class DetectorsConfig:
 class AnomalyConfig:
     min_cluster_size: int = 50
     contamination: float = 0.01
+    pca_components: int = 10
+    lof_neighbors: int = 20
+    iforest_estimators: int = 200
+    small_cluster_size: int = 200
     precision_at_k: tuple[int, ...] = (100, 500, 1000)
 
 

@@ -39,6 +39,10 @@ detectors:
 anomaly:
   min_cluster_size: 50
   contamination: 0.01
+  pca_components: 10          # LOF and HDBSCAN run in this PCA subspace (speed + distance quality)
+  lof_neighbors: 20
+  iforest_estimators: 200
+  small_cluster_size: 200     # HDBSCAN clusters smaller than this count as anomalous
   precision_at_k: [100, 500, 1000]
 
 supervised:

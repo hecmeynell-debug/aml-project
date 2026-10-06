@@ -115,14 +115,22 @@ def main(argv: list[str] | None = None) -> None:
         add_usd_amounts(cfg)
         build_patterns(cfg)
     elif args.command == "features":
-        _not_implemented(4, "features")
-    elif args.command == "detect":
-        from aml.detectors import detect_all
-        from aml.evaluate import evaluate_detectors
+        from aml.features import build_account_features, build_transaction_features
 
-        evaluate_detectors(cfg, detect_all(cfg))  # anomaly models are added in Phase 4
+        build_account_features(cfg)
+        build_transaction_features(cfg)
+    elif args.command == "detect":
+        from aml.anomaly import run_anomaly
+        from aml.detectors import detect_all
+        from aml.evaluate import evaluate_anomaly, evaluate_detectors
+
+        findings = detect_all(cfg)
+        evaluate_detectors(cfg, findings)
+        evaluate_anomaly(cfg, run_anomaly(cfg, findings))
     elif args.command == "train":
-        _not_implemented(5, "train")
+        from aml.supervised import train_supervised
+
+        train_supervised(cfg)  # precomputed app scores are added in Phase 6
     elif args.command == "app":
         run_app(cfg)
     elif args.command == "test":
