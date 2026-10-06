@@ -117,7 +117,10 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "features":
         _not_implemented(4, "features")
     elif args.command == "detect":
-        _not_implemented(3, "detect")
+        from aml.detectors import detect_all
+        from aml.evaluate import evaluate_detectors
+
+        evaluate_detectors(cfg, detect_all(cfg))  # anomaly models are added in Phase 4
     elif args.command == "train":
         _not_implemented(5, "train")
     elif args.command == "app":

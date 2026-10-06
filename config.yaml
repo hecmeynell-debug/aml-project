@@ -19,13 +19,22 @@ graph:
 detectors:
   cycle_length_bound: 6
   cycle_window_days: 14
+  cycle_min_length: 2
   amount_tolerance: 0.20
   max_cycles_per_component: 100000
   fan_windows_days: [1, 7]
-  fan_percentile: 99.9
+  fan_percentile: 99.5
   scatter_gather_min_paths: 3
   scatter_gather_window_days: 7
   attempt_detection_threshold: 0.5   # share of an attempt's txns that must be covered
+  max_expansions_per_component: 20000000  # work budget for the temporal cycle search
+  fan_min_degree: 3                  # never flag fewer distinct counterparties than this
+  max_intermediary_txns: 2000        # skip hub intermediaries with more in/out txns than this
+  pass_through_ratio_tol: 0.10       # |outflow/inflow - 1| must be within this
+  pass_through_max_dwell_hours: 24   # median dwell must be at most this
+  pass_through_min_txns: 2           # minimum incoming and outgoing txns
+  pass_through_min_usd: 1000         # minimum total inflow
+  max_txns_per_finding: 500          # cap on txn ids stored per finding
 
 anomaly:
   min_cluster_size: 50

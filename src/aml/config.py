@@ -44,13 +44,22 @@ class GraphConfig:
 class DetectorsConfig:
     cycle_length_bound: int = 6
     cycle_window_days: float = 14
+    cycle_min_length: int = 2
     amount_tolerance: float = 0.20
     max_cycles_per_component: int = 100_000
     fan_windows_days: tuple[int, ...] = (1, 7)
-    fan_percentile: float = 99.9
+    fan_percentile: float = 99.5
     scatter_gather_min_paths: int = 3
     scatter_gather_window_days: float = 7
     attempt_detection_threshold: float = 0.5
+    max_expansions_per_component: int = 20_000_000
+    fan_min_degree: int = 3
+    max_intermediary_txns: int = 2000
+    pass_through_ratio_tol: float = 0.10
+    pass_through_max_dwell_hours: float = 24.0
+    pass_through_min_txns: int = 2
+    pass_through_min_usd: float = 1000.0
+    max_txns_per_finding: int = 500
 
 
 @dataclass(frozen=True)
