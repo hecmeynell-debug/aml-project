@@ -2,7 +2,8 @@
 
 Outputs (all in ``data/processed/``):
 
-* ``transaction_scores.parquet``: every transaction with its supervised score and train/val/test
+* ``transaction_scores.parquet``: every transaction with its supervised ``score`` (percentile rank
+  of the model margin, 0-1), ``prob`` (approximate probability), ``flagged`` and train/val/test
   split. Scores on the *train* and *validation* splits are in-sample for the model and optimistic;
   only the ``test`` split is a fair evaluation.
 * ``account_scores.parquet``: ensemble anomaly score, maximum supervised score over the account's
@@ -59,17 +60,21 @@ def score_transactions(cfg: Config) -> pd.DataFrame:
         x = prepare_features(df, meta["categories"])[meta["features"]]
         parts.append(pd.DataFrame({
             "txn_id": df["txn_id"].to_numpy(),
-            "score": model.predict(x, num_iteration=meta["best_iteration"]),
+            "margin": model.predict(x, num_iteration=meta["best_iteration"], raw_score=True),
         }))
     scores = pd.concat(parts, ignore_index=True)
-    scores["flagged"] = scores["score"] >= meta["threshold"]
+    scores["flagged"] = scores["margin"] >= meta["threshold"]
+    # Calibrated-ish probability: remove the class-weight shift from the log-odds.
+    scores["prob"] = 1.0 / (1.0 + np.exp(-(scores["margin"] - meta["log_scale_pos_weight"])))
+    # Display score in [0, 1]: percentile rank of the margin over all transactions.
+    scores["score"] = rankdata(scores["margin"]) / len(scores)
     split = pd.read_parquet(proc / "txn_split.parquet")
     scores = scores.merge(split, on="txn_id", how="left")
     con = duckdb.connect()
     con.register("sc", scores)
     out = con.execute(f"""
         SELECT t.txn_id, t.timestamp, t.src, t.dst, t.amt_usd, t.payment_format, t.pay_ccy,
-               t.recv_ccy, t.is_laundering, sc.score, sc.flagged, sc.split
+               t.recv_ccy, t.is_laundering, sc.score, sc.prob, sc.margin, sc.flagged, sc.split
         FROM read_parquet('{cfg.transactions_parquet.as_posix()}') t JOIN sc USING (txn_id)
         ORDER BY t.txn_id
     """).df()

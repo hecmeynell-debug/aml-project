@@ -106,26 +106,30 @@ def train_supervised(cfg: Config) -> dict:
         logger.info("%s: %d rows, %d laundering (%.4f%%)", name, m.sum(), y[m].sum(),
                     100 * y[m].mean())
 
-    spw = float((y[tr] == 0).sum() / max(y[tr].sum(), 1))
+    # Full balancing (~1:1300) drives probabilities to exactly 1.0 and ties the top ranks, so the
+    # class weight is tempered: (neg / pos) ** pos_weight_power.
+    spw = float(((y[tr] == 0).sum() / max(y[tr].sum(), 1)) ** cfg.supervised.pos_weight_power)
     params = {
         "objective": "binary", "metric": "average_precision", "learning_rate": 0.05,
-        "num_leaves": 63, "min_child_samples": 50, "feature_fraction": 0.8,
+        "num_leaves": 31, "min_child_samples": 200, "lambda_l2": 10.0,
+        "min_sum_hessian_in_leaf": 1.0, "feature_fraction": 0.8,
         "bagging_fraction": 0.8, "bagging_freq": 1, "scale_pos_weight": spw,
         "seed": cfg.seed, "verbosity": -1, "num_threads": -1,
     }
     dtrain = lgb.Dataset(x[tr], y[tr])
     dval = lgb.Dataset(x[va], y[va], reference=dtrain)
     model = lgb.train(
-        params, dtrain, num_boost_round=1000, valid_sets=[dval], valid_names=["val"],
+        params, dtrain, num_boost_round=1500, valid_sets=[dval], valid_names=["val"],
         callbacks=[lgb.early_stopping(50, verbose=False), lgb.log_evaluation(0)],
     )
     logger.info("Best iteration %d (val AP %.4f)", model.best_iteration,
                 model.best_score["val"]["average_precision"])
 
-    p_val = model.predict(x[va], num_iteration=model.best_iteration)
-    p_te = model.predict(x[te], num_iteration=model.best_iteration)
+    # Rank and threshold on the raw margin (log-odds): it never saturates, unlike the probability.
+    p_val = model.predict(x[va], num_iteration=model.best_iteration, raw_score=True)
+    p_te = model.predict(x[te], num_iteration=model.best_iteration, raw_score=True)
     thr, f1_val = best_f1_threshold(y[va], p_val)
-    logger.info("Threshold %.4f (validation F1 %.4f)", thr, f1_val)
+    logger.info("Margin threshold %.4f (validation F1 %.4f), scale_pos_weight %.1f", thr, f1_val, spw)
     ks = tuple(cfg.anomaly.precision_at_k)
     res = {"validation": metrics_at(y[va], p_val, thr, ks), "test": metrics_at(y[te], p_te, thr, ks)}
 
@@ -152,6 +156,7 @@ def train_supervised(cfg: Config) -> dict:
     model.save_model(str(models / MODEL_FILE), num_iteration=model.best_iteration)
     meta = {"features": list(x.columns), "categories": cats, "threshold": thr,
             "best_iteration": model.best_iteration, "scale_pos_weight": spw,
+            "log_scale_pos_weight": float(np.log(spw)), "threshold_is_margin": True,
             "boundaries": {k: str(v) for k, v in bounds.items()}}
     (models / META_FILE).write_text(json.dumps(meta, indent=2), encoding="utf-8")
 

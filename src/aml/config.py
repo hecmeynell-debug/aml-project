@@ -78,6 +78,7 @@ class SupervisedConfig:
     train_frac: float = 0.6
     val_frac: float = 0.2
     lookback_days: tuple[int, ...] = (1, 7, 30)
+    pos_weight_power: float = 0.25
 
 
 @dataclass(frozen=True)

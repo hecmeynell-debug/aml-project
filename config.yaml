@@ -49,3 +49,4 @@ supervised:
   train_frac: 0.6
   val_frac: 0.2
   lookback_days: [1, 7, 30]
+  pos_weight_power: 0.25  # scale_pos_weight = (neg/pos)**power; chosen on validation AP (1.0 = full balancing saturates scores and overfits)
