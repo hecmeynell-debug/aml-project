@@ -82,18 +82,14 @@ def download_data(cfg: Config) -> None:
     logger.info("Download complete")
 
 
-def _not_implemented(phase: int, what: str) -> None:
-    raise SystemExit(f"'{what}' is not implemented yet (Phase {phase}).")
-
-
 def run_tests(_: Config) -> None:
     raise SystemExit(subprocess.call([sys.executable, "-m", "pytest", "-q"]))
 
 
 def run_app(cfg: Config) -> None:
     app = cfg.root / "app" / "streamlit_app.py"
-    if not app.exists():
-        _not_implemented(6, "app")
+    if not (cfg.root / cfg.paths.processed_dir / "account_scores.parquet").exists():
+        raise SystemExit("Score tables missing. Run `python -m aml.cli train` first.")
     raise SystemExit(subprocess.call([sys.executable, "-m", "streamlit", "run", str(app)]))
 
 
@@ -128,9 +124,11 @@ def main(argv: list[str] | None = None) -> None:
         evaluate_detectors(cfg, findings)
         evaluate_anomaly(cfg, run_anomaly(cfg, findings))
     elif args.command == "train":
+        from aml.scoring import build_all_scores
         from aml.supervised import train_supervised
 
-        train_supervised(cfg)  # precomputed app scores are added in Phase 6
+        train_supervised(cfg)
+        build_all_scores(cfg)  # precomputed tables the dashboard reads
     elif args.command == "app":
         run_app(cfg)
     elif args.command == "test":
