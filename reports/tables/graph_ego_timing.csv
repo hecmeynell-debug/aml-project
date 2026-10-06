@@ -1,0 +1,7 @@
+account,k,nodes,edges,seconds
+small illicit account,1,4,42,0.43
+small illicit account,2,14,128,0.76
+small illicit account,3,300,2973,1.0
+largest hub,1,300,2718,0.5
+largest hub,2,300,2718,0.75
+largest hub,3,300,2718,0.82
