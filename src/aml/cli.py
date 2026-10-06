@@ -106,7 +106,14 @@ def main(argv: list[str] | None = None) -> None:
     cfg = load_config(args.config)
 
     if args.command == "data":
-        download_data(cfg)  # ingest, FX and patterns steps are added in Phase 1
+        from aml.currency import add_usd_amounts
+        from aml.ingest import ingest
+        from aml.patterns import build_patterns
+
+        download_data(cfg)
+        ingest(cfg)
+        add_usd_amounts(cfg)
+        build_patterns(cfg)
     elif args.command == "features":
         _not_implemented(4, "features")
     elif args.command == "detect":
