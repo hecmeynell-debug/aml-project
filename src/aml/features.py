@@ -173,6 +173,8 @@ def build_transaction_features(cfg: Config) -> Path:
     out = cfg.root / cfg.paths.processed_dir / TXN_FEATURES_FILE
     con = duckdb.connect()
     con.execute("PRAGMA temp_directory='" + (cfg.root / "data" / "processed").as_posix() + "'")
+    con.execute("PRAGMA memory_limit='9GB'")
+    con.execute("SET preserve_insertion_order=false")
     con.execute(f"""
         CREATE TABLE base AS
         SELECT txn_id, timestamp AS ts, src, dst, amt_usd, amt_paid, payment_format, pay_ccy,
