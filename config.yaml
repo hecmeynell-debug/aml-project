@@ -1,0 +1,38 @@
+# All project settings. Switch dataset by changing `dataset.name` only
+# (HI-Small, HI-Medium, LI-Small, ...).
+seed: 42
+
+dataset:
+  name: HI-Small
+  kaggle_slug: ealtman2019/ibm-transactions-for-anti-money-laundering-aml
+
+paths:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  models_dir: models
+  figures_dir: reports/figures
+  tables_dir: reports/tables
+
+graph:
+  ego_max_nodes: 300
+
+detectors:
+  cycle_length_bound: 6
+  cycle_window_days: 14
+  amount_tolerance: 0.20
+  max_cycles_per_component: 100000
+  fan_windows_days: [1, 7]
+  fan_percentile: 99.9
+  scatter_gather_min_paths: 3
+  scatter_gather_window_days: 7
+  attempt_detection_threshold: 0.5   # share of an attempt's txns that must be covered
+
+anomaly:
+  min_cluster_size: 50
+  contamination: 0.01
+  precision_at_k: [100, 500, 1000]
+
+supervised:
+  train_frac: 0.6
+  val_frac: 0.2
+  lookback_days: [1, 7, 30]

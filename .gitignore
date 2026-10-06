@@ -1,0 +1,27 @@
+# Data and large outputs
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+models/*
+!models/.gitkeep
+reports/figures/*
+!reports/figures/.gitkeep
+*.parquet
+*.duckdb
+
+# Environments and caches
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets
+.env
+kaggle.json
+.kaggle/

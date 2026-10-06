@@ -1,0 +1,23 @@
+# data
+pandas
+pyarrow
+duckdb
+polars
+# graphs
+networkx>=3.1
+# modelling
+scikit-learn>=1.3
+hdbscan; python_version < "3.13"   # falls back to sklearn.cluster.HDBSCAN
+lightgbm
+shap
+# plotting
+matplotlib
+plotly
+# app
+pyvis
+streamlit
+# tooling
+pyyaml
+pytest
+jupyter
+kaggle
