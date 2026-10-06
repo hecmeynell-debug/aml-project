@@ -6,8 +6,8 @@ It covers ingestion and currency normalisation, graph analysis, rule-based typol
 unsupervised account anomaly detection, a supervised transaction model with strictly temporal
 evaluation, and an interactive investigation dashboard.
 
-> **Status:** Phases 0-3 are complete and documented below. Results for Phases 4-6 are filled in
-> once the full pipeline has run (see "Headline results").
+> **Status:** all phases complete. Results below were produced on HI-Small and are reproducible
+> from `make data features detect train` (a clean-clone run is described under "Reproducibility").
 
 ## Set-up
 
@@ -94,16 +94,70 @@ The `is_laundering` label is used only as the training target and for evaluation
 
 ## Headline results
 
-*(Phases 1-3 measured on HI-Small; Phases 4-6 to be completed.)*
+All on HI-Small (5,078,345 transactions, 515,088 accounts, 17.7 days, 5,177 laundering
+transactions = 0.102%). Tables are in `reports/tables/`; `notebooks/03_results.ipynb` collects them.
 
-- 5,078,345 transactions, 515,088 accounts, 17.7 days, 5,177 laundering transactions (0.102%).
+**Data and structure**
+
 - Only 3,209 of the 5,177 laundering transactions (62%) belong to a listed typology attempt.
 - Laundering is 5x over-represented inside non-trivial strongly connected components (23.5% of
-  laundering vs 4.9% of all transactions).
-- The union of rule-based detectors covers 69% of the 370 laundering attempts, at 0.23%
-  transaction-level precision. Individual detectors range from 0.13% (pass-through) to 33.9%
-  (scatter-gather). The cycle detector finds all cycles of up to 3 hops, 82% of 4-6 hops and none
-  of the longer ones (bound of 6).
+  laundering transactions vs 4.9% of all).
+
+**Rule-based detectors** (transaction level; base rate 0.10%)
+
+| Detector | Precision | Share of all laundering flagged |
+|---|---|---|
+| scatter-gather | 33.9% | 11.2% |
+| temporal cycle | 18.1% | 5.8% |
+| fan-out | 0.80% | 11.2% |
+| gather-scatter | 0.19% | 30.8% |
+| fan-in / pass-through | 0.44% / 0.13% | 3.9% / 2.9% |
+
+The union covers 69% of the 370 attempts (at least half of an attempt's transactions flagged) at
+0.23% precision. The cycle detector finds every cycle of up to 3 hops, 82% of 4-6 hops and none
+of the 20 longer ones (bound of 6). Small attempts are covered by coincidence, so read the
+diagonal of `detector_recall_by_typology.csv`, not the off-diagonal cells.
+
+**Unsupervised account anomaly detection** (422,734 active accounts; 1.5% illicit)
+
+| Method | PR-AUC | Precision@100 | Precision@1000 |
+|---|---|---|---|
+| Isolation Forest | 0.041 | 31% | 12.3% |
+| Ensemble (mean rank) | 0.038 | 31% | 10.5% |
+| LOF | 0.026 | 0% | 4.7% |
+| HDBSCAN | 0.018 | 2.2% | 2.2% |
+| Random | 0.015 | 1.5% | 1.5% |
+
+Isolation Forest is about 20x random in the top 100. LOF and HDBSCAN add little, so the ensemble
+does not beat Isolation Forest alone.
+
+**Supervised transaction model** (LightGBM, test = last 20% by time)
+
+| Slice | Positives | PR-AUC | F1 | Precision | Recall |
+|---|---|---|---|---|---|
+| Test (all) | 1,797 | 0.587 | 0.567 | 0.890 | 0.416 |
+| Test, before 11 Sep | 1,142 | 0.407 | 0.426 | 0.805 | 0.290 |
+| Test, from 11 Sep | 655 | 0.968 | 0.769 | 0.972 | 0.637 |
+
+Precision@100 / @500 / @1000 on the test set: 0.99 / 0.98 / 0.83. The "before 11 Sep" row is the
+fairer one (see the first limitation below): there, PR-AUC is about 370x the base rate. Recall by
+typology on the test set: fan-out 0.80, gather-scatter 0.65, scatter-gather 0.61, fan-in 0.55,
+cycle 0.50, stack 0.34, random 0.33, bipartite 0.23, and **0.4% for laundering transactions that
+are in no listed attempt**: the model finds the structured laundering, not the unattributed kind.
+The strongest features are whether the sender-receiver pair has transacted before, the sender's
+recent inflow (a pass-through signature), payment format and amount.
+
+A note on training: weighting the minority class by the full imbalance (about 1:1300) drove
+predicted probabilities to exactly 1.0, tying the top ranks and collapsing precision@k. The final
+model uses `scale_pos_weight = (neg/pos)^0.25` (about 6) with stronger regularisation, chosen on
+validation PR-AUC only, and ranks by the raw margin.
+
+## Reproducibility
+
+`python -m aml.cli data features detect train` was run from a fresh clone with a new virtual
+environment; see the repository history for the outcome. Runtime on a 16 GB laptop is dominated
+by HDBSCAN (about 25 minutes); the whole pipeline takes roughly an hour. Seeds are fixed in
+`config.yaml`, but multithreaded LightGBM and HDBSCAN can differ in the last decimals.
 
 ## Limitations
 
