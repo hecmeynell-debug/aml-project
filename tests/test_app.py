@@ -57,8 +57,9 @@ def run(account: str | None) -> "streamlit_testing.AppTest":
 def test_app_known_account_renders(processed: Path) -> None:
     at = run("A")
     assert not at.exception
-    assert any("Anomaly score" in m.label for m in at.metric)
-    assert any("temporal_cycle" in md.value for md in at.markdown) or True
+    html = " ".join(md.value for md in at.markdown)
+    assert "Anomaly score" in html and "Supervised score" in html
+    assert "Cycle" in html  # the detector chip for the fired cycle detector
 
 
 def test_app_unknown_account_and_empty_input(processed: Path) -> None:
