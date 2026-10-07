@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from aml.graph import ego_subgraph  # noqa: E402
+from aml.names import make_aliases  # noqa: E402
 
 PROC = Path(os.environ.get("AML_PROCESSED_DIR", ROOT / "data" / "processed"))
 MODELS = Path(os.environ.get("AML_MODELS_DIR", ROOT / "models"))
@@ -52,7 +53,10 @@ def load_tables() -> dict:
     con.execute(
         f"CREATE VIEW txs AS SELECT * FROM read_parquet('{(PROC / 'transaction_scores.parquet').as_posix()}')")
     lo, hi = con.execute("SELECT min(timestamp), max(timestamp) FROM txs").fetchone()
-    return {"accounts": accounts, "findings": findings, "con": con, "t_min": lo, "t_max": hi}
+    alias = make_aliases(accounts.index)
+    by_name = {v.lower(): k for k, v in alias.items()}
+    return {"accounts": accounts, "findings": findings, "con": con, "t_min": lo, "t_max": hi,
+            "alias": alias, "by_name": by_name}
 
 
 def account_txns(con, acc: str, start, end) -> pd.DataFrame:
@@ -72,8 +76,8 @@ def txn_scores(con, ids: list[int]) -> pd.DataFrame:
 
 
 def short(acc: str) -> str:
-    bank, _, a = acc.partition("_")
-    return f"{bank}/{a[:6]}"
+    """Readable name for an account (falls back to the raw ID for unknown accounts)."""
+    return load_tables()["alias"].get(acc, acc)
 
 
 # --------------------------------------------------------------------------- network
@@ -112,7 +116,7 @@ def build_network_html(g: nx.MultiDiGraph, centre: str, tabs: dict, show_truth: 
         a_score = float(row["anomaly_score"]) if row is not None and pd.notna(row["anomaly_score"]) else 0.0
         size = 10 + 30 * np.log1p(flow[n]) / np.log1p(max_flow)
         is_c = n == centre
-        title = (f"<b>{n}</b><br>anomaly score: {a_score:.3f}<br>"
+        title = (f"<b>{short(n)}</b><br>{n}<br>anomaly score: {a_score:.3f}<br>"
                  f"flow in graph: ${flow[n]:,.0f}<br>hop: {g.nodes[n].get('hop', '?')}")
         if row is not None:
             title += f"<br>supervised max: {row['max_supervised_score']:.3f}"
@@ -364,18 +368,20 @@ def main() -> None:
             st.session_state["account_input"] = shown.index[sel[0]]
 
     st.sidebar.markdown("## Account")
-    st.sidebar.text_input("Account ID", key="account_input", placeholder="bank_account, e.g. 070_100428660",
+    st.sidebar.text_input("Account", key="account_input",
+                          placeholder="name or ID, e.g. Amber Falcon 417 or 070_100428660",
                           label_visibility="collapsed")
     st.sidebar.markdown("### Top flagged accounts")
     n_top = st.sidebar.slider("Rows shown", 20, 500, 100, step=20)
     top = acc_df.sort_values("risk", ascending=False).head(n_top)[
         ["risk", "anomaly_score", "max_supervised_score"]]
     top = top.rename(columns={"risk": "Risk", "anomaly_score": "Anomaly", "max_supervised_score": "Supervised"})
+    top.insert(0, "Name", [tabs["alias"][a] for a in top.index])
     st.session_state["top_df"] = top
     st.sidebar.dataframe(
         top, key="top_table", on_select=on_pick, selection_mode="single-row", height=330,
         column_config={c: st.column_config.ProgressColumn(c, min_value=0.0, max_value=1.0, format="%.2f")
-                       for c in top.columns})
+                       for c in top.columns if c != "Name"})
     st.sidebar.caption("Click a row to investigate it.")
     st.sidebar.markdown("### Neighbourhood")
     k = st.sidebar.slider("Hop depth", 1, 3, 2)
@@ -389,6 +395,7 @@ def main() -> None:
                                    help="Off by default so investigations stay blind.")
 
     acc = (st.session_state.get("account_input") or "").strip()
+    acc = tabs["by_name"].get(acc.lower(), acc)  # accept a readable name or a raw ID
     if not acc:
         st.markdown('<div class="welcome"><h3>Start an investigation</h3>'
                     'Enter an account ID in the sidebar, click a row in the ranked table, or open one '
@@ -396,11 +403,11 @@ def main() -> None:
         st.write("")
         cols = st.columns(5)
         for col, name in zip(cols, acc_df.sort_values("risk", ascending=False).index[:5]):
-            col.button(name, on_click=set_account, args=(name,), width="stretch")
+            col.button(tabs["alias"][name], on_click=set_account, args=(name,), width="stretch")
         return
     if acc not in acc_df.index:
-        st.warning(f"Unknown account `{acc}`. Account IDs look like `070_100428660` "
-                   "(bank code, underscore, account number).")
+        st.warning(f"Unknown account `{acc}`. Use a name like `Amber Falcon 417` "
+                   "or an ID like `070_100428660` (bank code, underscore, account number).")
         return
 
     row = acc_df.loc[acc]
@@ -411,8 +418,8 @@ def main() -> None:
 
     # ---- header
     st.markdown(
-        f'<div class="acct-strip"><span class="acct-id">{acc}</span>{risk_badge(risk_pct)}'
-        f'<span class="muted">bank {bank} &middot; {int(row["n_in"])} incoming / {int(row["n_out"])} '
+        f'<div class="acct-strip"><span class="acct-id">{short(acc)}</span>{risk_badge(risk_pct)}'
+        f'<span class="muted">ID {acc} &middot; bank {bank} &middot; {int(row["n_in"])} incoming / {int(row["n_out"])} '
         f'outgoing transactions &middot; risk percentile {risk_pct * 100:.1f}</span></div>',
         unsafe_allow_html=True)
     c1, c2, c3, c4, c5 = st.columns(5)
@@ -457,6 +464,7 @@ def main() -> None:
         panel("Timeline", "Each point is a transaction; colour is the supervised score")
         tx["direction"] = np.where(tx["src"] == acc, "out", "in")
         tx["counterparty"] = np.where(tx["src"] == acc, tx["dst"], tx["src"])
+        tx["counterparty"] = tx["counterparty"].map(short)
         fig = px.scatter(tx, x="timestamp", y="amt_usd", color="score", symbol="direction",
                          color_continuous_scale="RdBu_r", range_color=(0, 1), log_y=True,
                          hover_data=["counterparty", "payment_format", "pay_ccy", "recv_ccy"],
