@@ -53,14 +53,17 @@ def load_tables() -> dict:
     con.execute(
         f"CREATE VIEW txs AS SELECT * FROM read_parquet('{(PROC / 'transaction_scores.parquet').as_posix()}')")
     lo, hi = con.execute("SELECT min(timestamp), max(timestamp) FROM txs").fetchone()
+    accounts = accounts.copy()
+    top_ids = accounts["risk"].nlargest(500).index
     alias = make_aliases(accounts.index)
     by_name = {v.lower(): k for k, v in alias.items()}
     return {"accounts": accounts, "findings": findings, "con": con, "t_min": lo, "t_max": hi,
-            "alias": alias, "by_name": by_name}
+            "alias": alias, "by_name": by_name, "top_ids": top_ids}
 
 
-def account_txns(con, acc: str, start, end) -> pd.DataFrame:
-    return con.execute(
+@st.cache_data(show_spinner=False, max_entries=64)
+def account_txns(_con, acc: str, start, end) -> pd.DataFrame:
+    return _con.execute(
         "SELECT * FROM txs WHERE (src = ? OR dst = ?) AND timestamp BETWEEN ? AND ? "
         "AND src <> dst ORDER BY timestamp",
         [acc, acc, start, end]).df()
@@ -81,8 +84,19 @@ def short(acc: str) -> str:
 
 
 # --------------------------------------------------------------------------- network
-def build_network_html(g: nx.MultiDiGraph, centre: str, tabs: dict, show_truth: bool) -> str:
-    """Interactive pyvis network. Edges are aggregated per account pair."""
+@st.cache_data(show_spinner=False, max_entries=32)
+def ego_graph(acc: str, k: int, start, end, max_nodes: int) -> nx.MultiDiGraph:
+    return ego_subgraph(acc, k=k, start=start, end=end, max_nodes=max_nodes,
+                        parquet=PROC / "transactions.parquet")
+
+
+@st.cache_data(show_spinner=False, max_entries=32)
+def build_network_html(_g: nx.MultiDiGraph, centre: str, key: tuple, show_truth: bool) -> str:
+    """Interactive pyvis network. Edges are aggregated per account pair.
+
+    ``key`` (the arguments that produced the graph) is what the cache hashes; ``_g`` is not.
+    """
+    g, tabs = _g, load_tables()
     acc = tabs["accounts"]
     con = tabs["con"]
     ids = [d["txn_id"] for _, _, d in g.edges(data=True)]
@@ -149,8 +163,10 @@ def build_network_html(g: nx.MultiDiGraph, centre: str, tabs: dict, show_truth: 
 
 
 # --------------------------------------------------------------------------- other panels
-def sankey(con, acc: str, start, end, per_level: int = 8, per_level2: int = 4) -> go.Figure:
+@st.cache_data(show_spinner=False, max_entries=64)
+def sankey(_con, acc: str, start, end, per_level: int = 8, per_level2: int = 4) -> go.Figure:
     """Money flowing in (up to two hops upstream) and out (up to two hops downstream)."""
+    con = _con
     def top(direction: str, nodes: list[str], limit: int) -> pd.DataFrame:
         key, other = ("dst", "src") if direction == "in" else ("src", "dst")
         con.register("nodes_", pd.DataFrame({"n": nodes}))
@@ -373,8 +389,7 @@ def main() -> None:
                           label_visibility="collapsed")
     st.sidebar.markdown("### Top flagged accounts")
     n_top = st.sidebar.slider("Rows shown", 20, 500, 100, step=20)
-    top = acc_df.sort_values("risk", ascending=False).head(n_top)[
-        ["risk", "anomaly_score", "max_supervised_score"]]
+    top = acc_df.loc[tabs["top_ids"][:n_top], ["risk", "anomaly_score", "max_supervised_score"]]
     top = top.rename(columns={"risk": "Risk", "anomaly_score": "Anomaly", "max_supervised_score": "Supervised"})
     top.insert(0, "Name", [tabs["alias"][a] for a in top.index])
     st.session_state["top_df"] = top
@@ -402,7 +417,7 @@ def main() -> None:
                     'of the highest-risk accounts below.</div>', unsafe_allow_html=True)
         st.write("")
         cols = st.columns(5)
-        for col, name in zip(cols, acc_df.sort_values("risk", ascending=False).index[:5]):
+        for col, name in zip(cols, tabs["top_ids"][:5]):
             col.button(tabs["alias"][name], on_click=set_account, args=(name,), width="stretch")
         return
     if acc not in acc_df.index:
@@ -444,14 +459,14 @@ def main() -> None:
 
     # ---- network
     panel("Transaction network", f"{k}-hop neighbourhood, {start:%b %d} to {end:%b %d}")
-    g = ego_subgraph(acc, k=k, start=start, end=end, max_nodes=int(max_nodes),
-                     parquet=PROC / "transactions.parquet")
+    g = ego_graph(acc, k, start, end, int(max_nodes))
     if g.number_of_edges() == 0:
         st.info("No transactions with other accounts in this date range. Widen the range in the sidebar.")
         return
     if g.number_of_nodes() >= max_nodes:
         st.caption(f"Capped at {max_nodes} nodes; the highest-value links were kept.")
-    components.html(build_network_html(g, acc, tabs, show_truth), height=650, scrolling=False)
+    components.html(build_network_html(
+        g, acc, (acc, k, start, end, int(max_nodes)), show_truth), height=650, scrolling=False)
     st.markdown(legend_html(), unsafe_allow_html=True)
 
     # ---- sankey and timeline
